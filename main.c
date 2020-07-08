@@ -75,8 +75,8 @@ void handler(aeEventLoop *eventLoop, int fd, void *data, int mask) {
     struct sockaddr_storage ss;
     socklen_t sLen = sizeof(ss);
     int clientFd = accept(fd, (struct sockaddr *) &ss, &sLen);
-    printf("accepted.\n");
-    close(clientFd);
+    printf("fd: %d, accepted\n", clientFd);
+    // close(clientFd);
 }
 
 int aeProcessEvents(aeEventLoop *eventLoop) {
