@@ -2,24 +2,18 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <unistd.h>
-#include "ae.h"
-#include "anet.c"
-#include "ae_select.c"
+#include <errno.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <string.h>
+#include <fcntl.h>
+#include "ae.c"
 
 
 
 void error(int errNo) {
     printf("%d\n", errNo);
     exit(0);
-}
-
-void serveLog(const char *fmt, ...) {
-    va_list ap;
-    char msg[100];
-
-    va_start(ap, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, ap);
-    va_end(ap);
 }
 
 aeEventLoop *createEventLoop() {
@@ -50,25 +44,39 @@ aeEventLoop *createEventLoop() {
     return eventLoop;
 }
 
-int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask, aeFileProc *proc) {
-    aeFileEvent *fe = &eventLoop->events[fd];
+void readFromClient(aeEventLoop *eventLoop, int fd, void *data, int mask) {
+    int readLen = 1024;
+    char buf[readLen];
+    int n = read(fd, buf, readLen);
+    if (n == -1) {
+        if (errno == EAGAIN) {
+            return;
+        } else {
+            printf("fd %d closed. errno: %d.\n", fd, errno);
+            close(fd);
+            return;
+        }
+    } else if (n == 0) {
+        printf("fd %d close connection. errno: %d.\n", fd, errno);
+        close(fd);
+        return;
+    } else {
+        printf("%s", buf);
 
-    // 设置FD描述符
-    aeApiAddEvent(eventLoop, fd, mask);
+        if (buf[0] == '@') {
+            aeDeleteFileEvent(eventLoop, fd, AE_READABLE);
+            close(fd);
+            return ;
+        }
 
-    // TODO ????
-    fe->mask |= mask;
-
-    // 设置读写处理事件
-    if (mask & AE_READABLE) {
-        fe->rFileProc = proc;
-        fe->wFileProc = proc;
+        if (write(fd, buf, n) < 0) {
+            printf("fd %d error . errno: %d.\n", fd, errno);
+        }
     }
+}
 
-    if (fd > eventLoop->maxfd) {
-        eventLoop->maxfd = fd;
-    }
-    return 0;
+void writeToClient(aeEventLoop *eventLoop, int fd, void *data, int mask) {
+
 }
 
 void handler(aeEventLoop *eventLoop, int fd, void *data, int mask) {
@@ -76,8 +84,9 @@ void handler(aeEventLoop *eventLoop, int fd, void *data, int mask) {
     socklen_t sLen = sizeof(ss);
     int clientFd = accept(fd, (struct sockaddr *) &ss, &sLen);
     printf("fd: %d, accepted\n", clientFd);
-    // close(clientFd);
+    aeCreateFileEvent(eventLoop, clientFd, AE_READABLE, readFromClient);
 }
+
 
 int aeProcessEvents(aeEventLoop *eventLoop) {
     int processed = 0, eventsNum;
@@ -114,8 +123,9 @@ void aeMain(aeEventLoop *eventLoop) {
 
 int anetTcpServer(int port)
 {
+    // 创建一个监听的socket
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-    // 设置为非阻塞
+    // 设置为socket为非阻塞
     fcntl(listen_fd, F_SETFL, O_NONBLOCK);
 
     // 设置server参数
@@ -125,7 +135,9 @@ int anetTcpServer(int port)
     serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
     serverAddr.sin_port = htons(port);
 
+    // 把server信息绑定到socket
     bind(listen_fd, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
+    // 监听socket
     listen(listen_fd, 1024);
 
     return listen_fd;
@@ -138,15 +150,15 @@ int main() {
     aeEventLoop *eventLoop = createEventLoop();
     printf("eventLoop Created.\n");
 
-    // 启动tcp服务器
+    // 创建并启动tcp服务
     int fd = anetTcpServer(52000);
     printf("tcp server created %d.\n", fd);
 
-    // 绑定文件事件处理器
+    // 注册可读事件处理函数
     aeCreateFileEvent(eventLoop, fd, AE_READABLE, handler);
     printf("file event created.\n");
 
-    // 运行主循环
+    // 事件循环
     printf("event loop start.\n");
     aeMain(eventLoop);
     printf("event loop end.\n");

@@ -3,4 +3,4 @@ project(netDemo C)
 
 set(CMAKE_C_STANDARD 99)
 
-add_executable(netDemo main.c ae.h ae_select.c anet.c)
+add_executable(netDemo main.c)
